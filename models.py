@@ -3,7 +3,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import date
 
 # Replace this with your actual Supabase connection string
-DATABASE_URL = "postgresql://postgres:[Chupachups3]@db.dlhwvoejafhshxagytky.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres:[PASSWORD]@db.dlhwvoejafhshxagytky.supabase.co:5432/postgres"
 
 # Set up the connection
 engine = create_engine(DATABASE_URL)
