@@ -1,19 +1,18 @@
-from sqlalchemy import create_engine, Column, Integer, String, Date
+from sqlalchemy import create_engine, Column, Integer, String, Date, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import date
+from config import DATABASE_URL
 
-# Replace this with your actual Supabase connection string
-DATABASE_URL = "postgresql://postgres:[PASSWORD]@db.dlhwvoejafhshxagytky.supabase.co:5432/postgres"
-
-# Set up the connection
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Define your table structure
 class DailyAnalysis(Base):
     __tablename__ = "daily_analysis"
-    
+    __table_args__ = (
+        UniqueConstraint('date', 'ticker', name='uq_date_ticker'),
+    )
+
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, default=date.today)
     ticker = Column(String, index=True)
@@ -21,5 +20,6 @@ class DailyAnalysis(Base):
     signal = Column(String)
     rationale = Column(String)
 
-# This magic line automatically creates the table in Supabase if it doesn't exist yet!
-Base.metadata.create_all(bind=engine)
+# Note: Do NOT use Base.metadata.create_all() in production.
+# Instead, use Alembic migrations. For quick prototyping, uncomment the next line:
+# Base.metadata.create_all(bind=engine)
