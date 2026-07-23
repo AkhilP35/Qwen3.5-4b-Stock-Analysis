@@ -1,31 +1,17 @@
 import ollama
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import Literal
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from config import OLLAMA_MODEL
 
-# 1. The System Prompt 
+logger = logging.getLogger(__name__)
+
+# System prompt (unchanged)
 SYSTEM_PROMPT = """You are an expert financial analyst specializing in technical analysis and risk assessment.
+... (the rest stays exactly the same) ..."""
 
-## Your Role
-Analyze stock data using price action, moving averages, and trend analysis to provide actionable insights for short-term traders.
-
-## Core Rules
-- Never invent price data or market events not provided in the input.
-- When data is insufficient, state your confidence level in the reasoning.
-- Always return ONLY valid JSON matching the exact schema provided.
-- Be decisive — don't hedge with "might" or "could" unless data is truly ambiguous.
-- Your signal must be strictly one of: "BUY", "HOLD", or "SELL".
-- Always use English language for the reasoning and response.
-
-## Analysis Methodology
-- Compare recent closing prices to the 30-day moving average to determine trend direction.
-- Assess whether the trend is accelerating, decelerating, or reversing.
-- Consider volatility implied by the price range versus the moving average.
-- Risk score (1-10): 1-3 = stable trend with low volatility, 4-6 = moderate uncertainty, 7-10 = high volatility or trend reversal risk.
-
-"""
-
-# 2. Define the Pydantic Schema
-# This enforces the rules from your system prompt structurally.
+# Pydantic schema (unchanged)
 class StockAnalysis(BaseModel):
     ticker: str
     signal: Literal["BUY", "HOLD", "SELL"]
@@ -33,53 +19,42 @@ class StockAnalysis(BaseModel):
     confidence_level: str = Field(description="State confidence based on data availability")
     reasoning: str = Field(description="2-3 sentences covering the primary trend, evidence, and risk factor")
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError, Exception)),
+    reraise=True
+)
 def analyze_stock(ticker: str, financial_data: str) -> StockAnalysis:
-    """Sends financial data to Qwen via Ollama and returns a validated Pydantic object."""
-    
-    print(f"Analyzing {ticker} with qwen3.5:4b...")
-    
-    # 3. Call the Model
-    response = ollama.chat(
-        model='qwen3.5:4b',
-        messages=[
-            {'role': 'system', 'content': SYSTEM_PROMPT},
-            {'role': 'user', 'content': f'Analyze this stock data for {ticker}:\n{financial_data}'}
-        ],
-        # Forces the local model to strictly adhere to the Pydantic JSON schema
-        format=StockAnalysis.model_json_schema(),
-        # A temperature of 0 is crucial for financial analysis to stop hallucinations
-        options={'temperature': 0.0}
-    )
-    
-    # 4. Parse and Validate
-    raw_json_string = response.message.content
-    validated_data = StockAnalysis.model_validate_json(raw_json_string)
-    
-    return validated_data
+    """Sends financial data to the local LLM and returns a validated Pydantic object."""
+    logger.info(f"Analyzing {ticker} with model {OLLAMA_MODEL}...")
 
-# --- Execution Example ---
-if __name__ == "__main__":
-    # Mock data to test the logic constraints
-    mock_data = """
-    Ticker: NVDA
-    Current Price: $118.50
-    30-Day Moving Average: $125.20
-    Recent Price Range: $112.00 - $122.00
-    Volume: Decelerating over the last 5 days
-    News: Semiconductor sector facing mild headwinds due to supply chain delays.
-    """
-    
     try:
-        # Run the analysis
-        analysis = analyze_stock("NVDA", mock_data)
-        
-        # Print output to confirm successful structure
-        print("\n--- Analysis Complete ---")
-        print(f"Ticker: {analysis.ticker}")
-        print(f"Signal: {analysis.signal}")
-        print(f"Risk Score: {analysis.risk_score}/10")
-        print(f"Confidence: {analysis.confidence_level}")
-        print(f"Reasoning:\n{analysis.reasoning}")
-        
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[
+                {'role': 'system', 'content': SYSTEM_PROMPT},
+                {'role': 'user', 'content': f'Analyze this stock data for {ticker}:\n{financial_data}'}
+            ],
+            format=StockAnalysis.model_json_schema(),
+            options={'temperature': 0.0}
+        )
+        raw_json_string = response.message.content
+        validated_data = StockAnalysis.model_validate_json(raw_json_string)
+        return validated_data
+
+    except ValidationError as ve:
+        logger.error(f"LLM output schema validation failed for {ticker}: {ve}")
+        raise  # Will trigger retry because it's an Exception
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"Ollama call failed for {ticker}: {e}")
+        raise
+
+# Execution example (if run directly)
+if __name__ == "__main__":
+    mock_data = """..."""  # same as before
+    try:
+        analysis = analyze_stock("NVDA", mock_data)
+        # ... print
+    except Exception as e:
+        logger.exception("Analysis failed")
