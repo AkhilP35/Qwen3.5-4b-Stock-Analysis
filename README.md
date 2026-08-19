@@ -1,4 +1,6 @@
-# Qwen3.5-4b-Stock-Analysis
+# Qwen3.5-4b-Stock-Analysis 
+
+# STILL IN DEVELOPMENT
 
 ## Test Output (AAPL) - http://localhost:8000/analyze/AAPL
 
